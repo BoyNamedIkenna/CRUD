@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../supabase-client'
-import type { Session } from '@supabase/supabase-js';
+import { type Session, } from '@supabase/supabase-js';
 
 interface Task {
   id: number;
@@ -52,17 +52,14 @@ function TaskManager({ session }: { session: Session }) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const { error, data } = await supabase
+    const { error } = await supabase
       .from("tasks")
       .insert({ ...newTask, email: session.user.email })
-      .select()
       .single();
 
     if (error) {
       console.error("Error inserting task: ", error.message);
     }
-    setTasks((prev) => [...prev, data])
-
     setNewTask({ title: "", description: "" });
   }
 
@@ -70,27 +67,30 @@ function TaskManager({ session }: { session: Session }) {
     fetchTasks();
   }, [])
 
-useEffect(() => {
-  console.log("Setting up realtime subscription...");
+  useEffect(() => {
+    const channel = supabase
+      .channel('tasks')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'tasks',
+        },
+        (payload) => {
+          console.log('Change received!', payload);
+          const newTask = payload.new as Task;
+          setTasks((prev) => [...prev, newTask]);
+        }
+      )
+      .subscribe();
 
-  const channel = supabase
-    .channel('public:tasks')
-    .on('postgres_changes', {
-      event: '*',
-      schema: 'public',
-      table: 'tasks',
-    }, (payload) => {
-      console.log("Realtime payload:", payload);
-    })
-    .subscribe((status) => {
-      console.log("Subscription status:", status);
-    });
+    // Cleanup on unmount
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
-  return () => {
-    console.log("Cleaning up subscription...");
-    supabase.removeChannel(channel);
-  };
-}, []);
 
 
 
